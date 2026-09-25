@@ -1,0 +1,30 @@
+# Copy to /data/onvif-shim/shim.conf on the UniFi console and edit.
+# Plain KEY=VALUE lines (read by both systemd and /bin/sh). No quotes, no spaces.
+
+# REQUIRED: the camera's IP address (use a DHCP reservation so it never changes)
+SHIM_CAM_HOST=192.0.2.10
+
+# Camera ports (Reolink defaults)
+SHIM_CAM_PORT=8000
+SHIM_CAM_HTTP_PORT=80
+
+# Motion source:
+#   ai          = drive Protect motion from the camera's AI detections
+#                 (person/vehicle/animal). Recommended for Reolink.
+#   passthrough = only fix the WS-Addressing headers; Protect uses the
+#                 camera's own pixel-motion signal.
+SHIM_MOTION_MODE=ai
+
+# Seconds to hold "motion off" so brief detection dropouts don't split events
+SHIM_OFF_HOLD=10
+
+# Motion-start thumbnails (1 = on, 0 = off). Needs HTTP enabled on the camera
+# and credentials in /data/onvif-shim/camera.env. When 0, port 80 is not touched.
+SHIM_SNAPSHOTS=1
+SHIM_SNAP_SERVE_WINDOW=20
+
+# Advanced (change only if they clash with something on your console)
+SHIM_LISTEN_PORT=18000
+SHIM_SNAP_LISTEN_PORT=18080
+SHIM_MARK=0x40000000
+SHIM_LOG_EVENTS=1

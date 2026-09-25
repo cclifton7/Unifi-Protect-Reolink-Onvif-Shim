@@ -1,0 +1,5 @@
+# Never commit camera credentials or your local config
+camera.env
+shim.conf
+__pycache__/
+*.pcap

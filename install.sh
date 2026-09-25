@@ -1,0 +1,67 @@
+#!/bin/sh
+# (Re)install the ONVIF shim. Safe to re-run, e.g. after a UniFi OS update.
+#   sh /data/onvif-shim/install.sh            install/enable
+#   sh /data/onvif-shim/install.sh uninstall  remove units + rules (keeps /data/onvif-shim)
+set -e
+D=/data/onvif-shim
+U=/etc/systemd/system
+
+if [ "$1" = "uninstall" ]; then
+  systemctl disable --now onvif-shim-rule.timer onvif-shim.service 2>/dev/null || true
+  [ -f $D/shim.conf ] && sh $D/rule.sh remove
+  rm -f $U/onvif-shim.service $U/onvif-shim-rule.service $U/onvif-shim-rule.timer
+  systemctl daemon-reload
+  echo "onvif-shim uninstalled"
+  exit 0
+fi
+
+[ -f $D/shim.conf ] || { echo "Create $D/shim.conf first (see shim.conf.example)"; exit 1; }
+. $D/shim.conf
+[ -n "$SHIM_CAM_HOST" ] || { echo "Set SHIM_CAM_HOST in $D/shim.conf"; exit 1; }
+command -v python3 >/dev/null || { echo "python3 not found on this console"; exit 1; }
+
+cat > $U/onvif-shim.service <<EOF
+[Unit]
+Description=ONVIF shim (UniFi Protect <-> Reolink)
+After=network-online.target
+
+[Service]
+EnvironmentFile=$D/shim.conf
+ExecStart=/usr/bin/env python3 -u $D/onvif_shim.py
+ExecStopPost=/bin/sh $D/rule.sh remove
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > $U/onvif-shim-rule.service <<EOF
+[Unit]
+Description=Ensure ONVIF shim DNAT rules
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh $D/rule.sh ensure
+EOF
+
+cat > $U/onvif-shim-rule.timer <<EOF
+[Unit]
+Description=Re-check ONVIF shim DNAT rules
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=30
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload
+systemctl enable onvif-shim.service
+systemctl restart onvif-shim.service
+sleep 2
+sh $D/rule.sh ensure
+systemctl enable --now onvif-shim-rule.timer
+echo "onvif-shim installed for camera $SHIM_CAM_HOST"
