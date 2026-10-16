@@ -1,8 +1,11 @@
 # Copy to /data/onvif-shim/shim.conf on the UniFi console and edit.
 # Plain KEY=VALUE lines (read by both systemd and /bin/sh). No quotes, no spaces.
 
-# REQUIRED: the camera's IP address (use a DHCP reservation so it never changes)
-SHIM_CAM_HOST=192.0.2.10
+# REQUIRED: the cameras' IP addresses, comma-separated, no spaces (use DHCP
+# reservations so they never change). Camera n in this list uses ports
+# SHIM_LISTEN_PORT+n and SHIM_SNAP_LISTEN_PORT+n; adding cameras at the end
+# keeps existing ones on the same ports. (SHIM_CAM_HOST=one-ip still works.)
+SHIM_CAM_HOSTS=192.0.2.10,192.0.2.11
 
 # Camera ports (Reolink defaults)
 SHIM_CAM_PORT=8000
@@ -18,8 +21,10 @@ SHIM_MOTION_MODE=ai
 # Seconds to hold "motion off" so brief detection dropouts don't split events
 SHIM_OFF_HOLD=10
 
-# Motion-start thumbnails (1 = on, 0 = off). Needs HTTP enabled on the camera
-# and credentials in /data/onvif-shim/camera.env. When 0, port 80 is not touched.
+# Motion-start thumbnails (1 = on, 0 = off). Needs HTTP enabled on the cameras
+# and credentials in /data/onvif-shim/camera.env (SHIM_CAM_USER / SHIM_CAM_PASS;
+# SHIM_CAM_USER.<ip> / SHIM_CAM_PASS.<ip> for a camera with its own login).
+# When 0, port 80 is not touched.
 SHIM_SNAPSHOTS=1
 SHIM_SNAP_SERVE_WINDOW=20
 

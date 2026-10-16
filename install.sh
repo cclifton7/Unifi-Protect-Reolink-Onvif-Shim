@@ -17,7 +17,7 @@ fi
 
 [ -f $D/shim.conf ] || { echo "Create $D/shim.conf first (see shim.conf.example)"; exit 1; }
 . $D/shim.conf
-[ -n "$SHIM_CAM_HOST" ] || { echo "Set SHIM_CAM_HOST in $D/shim.conf"; exit 1; }
+[ -n "${SHIM_CAM_HOSTS:-$SHIM_CAM_HOST}" ] || { echo "Set SHIM_CAM_HOSTS in $D/shim.conf"; exit 1; }
 command -v python3 >/dev/null || { echo "python3 not found on this console"; exit 1; }
 
 cat > $U/onvif-shim.service <<EOF
@@ -64,4 +64,4 @@ systemctl restart onvif-shim.service
 sleep 2
 sh $D/rule.sh ensure
 systemctl enable --now onvif-shim-rule.timer
-echo "onvif-shim installed for camera $SHIM_CAM_HOST"
+echo "onvif-shim installed for camera(s) ${SHIM_CAM_HOSTS:-$SHIM_CAM_HOST}"
