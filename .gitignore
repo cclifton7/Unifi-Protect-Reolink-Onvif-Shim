@@ -3,3 +3,5 @@ camera.env
 shim.conf
 __pycache__/
 *.pcap
+# Editor swap files (vim's .camera.env.swp can hold the password in plain text)
+.*.swp
