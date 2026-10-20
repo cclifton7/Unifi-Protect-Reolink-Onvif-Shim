@@ -23,6 +23,7 @@ If your Reolink camera is adopted in UniFi Protect as a third-party ONVIF camera
 - [Security considerations](#security-considerations)
 - [Limitations](#limitations)
 - [Related tips](#related-tips)
+- [Version history](#version-history)
 
 ---
 
@@ -236,7 +237,7 @@ Credentials go in `/data/onvif-shim/camera.env` (created in Step 5), never in `s
 | `Snapshot not available` in Protect logs | HTTP (port 80) is disabled on the camera. Needed for *any* third-party thumbnail, with or without the shim. |
 | Events in Protect but no phone notification | Add the camera to your **Alarm Manager** motion rule. Also check phone Focus modes and the Protect app's notification settings. |
 | `non-200 … deviceIO_service: 400` in the log | Harmless. Reolink doesn't implement that ONVIF service; this happens without the shim too. |
-| Motion stopped after the camera rebooted or dropped off; `onvif.events.log` shows `motionDetection available -> unsupported [unsupported: no eventServicePath]` | Shim versions before the outage fix closed Protect's connection silently while the camera was unreachable, and Protect took that to mean the camera has no event service. Protect doesn't re-check on its own: update the shim, then remove the camera in Protect and adopt it again. Check it's still in your Alarm Manager motion rule afterwards. |
+| Motion stopped after the camera rebooted or dropped off; `onvif.events.log` shows `motionDetection available -> unsupported [unsupported: no eventServicePath]` | Shim versions before 1.0.1 closed Protect's connection silently while the camera was unreachable, and Protect took that to mean the camera has no event service. Protect doesn't re-check on its own: update the shim, then remove the camera in Protect and adopt it again. Check it's still in your Alarm Manager motion rule afterwards. |
 | Service won't start: `SHIM_CAM_HOST is not set` | Create or fix `/data/onvif-shim/shim.conf`. |
 
 Protect's own logs are in `/srv/unifi-protect/logs/`. The useful ones are `onvif.events.log` and `events.cameras.log` (search for the camera's MAC or IP), and `notifications.push.log`.
@@ -278,6 +279,19 @@ Protect ──► CAMERA_IP:80   ──[iptables nat OUTPUT DNAT]──► 127.0
 ---
 
 *Contributions welcome, especially test results from other Reolink models and UniFi consoles.*
+
+## Version history
+
+Version numbers follow [semantic versioning](https://semver.org/): a bug fix bumps the last number, new features or settings bump the middle number, and a change that needs you to edit your config or reinstall bumps the first.
+
+To see which version you're running, compare the checksum of your copy (`md5sum /data/onvif-shim/onvif_shim.py`) with the table.
+
+| Version | Date | `onvif_shim.py` md5 | Changes |
+|---|---|---|---|
+| **1.0.1** | 2026-10-19 | `a533a3ec06673ae3c63593004af9a054` | **Fix:** motion could stop permanently after the camera rebooted or briefly dropped off the network. While the camera was unreachable, the shim closed Protect's connection without a response. Protect took that to mean the camera has no event service and marked motion `unsupported: no eventServicePath`, a state it never re-checks. The shim now resets the connection instead, so Protect treats the camera as temporarily unreachable and retries. If you were already affected, update, then remove and re-adopt the camera in Protect (see [Troubleshooting](#troubleshooting)). Also: `.gitignore` now excludes editor swap files, which can contain the camera password. |
+| **1.0.0** | 2026-09-24 | `f6a196d52b8dee7ea73522610a8841d3` | First release: WS-Addressing header fix, AI-driven motion, motion-start thumbnails, `shim.conf` configuration, installer and fail-safe firewall rules. |
+
+**Upgrading:** copy the new `onvif_shim.py` to `/data/onvif-shim/`, then run `systemctl restart onvif-shim && sleep 2 && sh /data/onvif-shim/rule.sh ensure`. Your `shim.conf` and `camera.env` are unchanged.
 
 ## License
 
