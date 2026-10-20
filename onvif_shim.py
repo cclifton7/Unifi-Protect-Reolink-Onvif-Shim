@@ -21,6 +21,7 @@ import os
 import re
 import socket
 import socketserver
+import struct
 import sys
 import threading
 import time
@@ -427,6 +428,7 @@ class Handler(socketserver.StreamRequestHandler):
         raw = b"\r\n".join(out) + b"\r\n\r\n" + body
 
         up = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sent = False
         try:
             up.setsockopt(socket.SOL_SOCKET, SO_MARK, MARK)
             up.settimeout(90)
@@ -441,6 +443,8 @@ class Handler(socketserver.StreamRequestHandler):
                         break
                     chunks.append(chunk)
                 resp = b"".join(chunks)
+                if not resp:
+                    raise ConnectionResetError("camera closed the connection with no response")
                 if LOG_EVENTS:
                     log_events(resp)
                 if MOTION_MODE == "ai":
@@ -463,11 +467,32 @@ class Handler(socketserver.StreamRequestHandler):
                             parts[0].decode(errors="replace"), path,
                             status.decode(errors="replace")))
                 self.wfile.write(chunk)
+                sent = True
+            if not sent:
+                raise ConnectionResetError("camera closed the connection with no response")
             self.wfile.flush()
         except OSError as e:
             log("upstream error for %s: %s" % (path, e))
+            if not sent:
+                self.abort()
         finally:
             up.close()
+
+    def abort(self):
+        """Fail Protect's connection with a TCP reset, as the camera would.
+
+        Closing it cleanly instead shows up in Protect as "other side closed",
+        which Protect does NOT treat as a network error. If that happens while
+        the camera is rebooting, Protect concludes the camera has no event
+        service and marks motion "unsupported: no eventServicePath" for good.
+        A reset (ECONNRESET) is retried, like a refused connection would be.
+        """
+        try:
+            self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
+                                       struct.pack("ii", 1, 0))
+            self.connection.close()
+        except OSError:
+            pass
 
 
 class Server(socketserver.ThreadingTCPServer):
