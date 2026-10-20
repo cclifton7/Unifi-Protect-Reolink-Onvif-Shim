@@ -83,11 +83,22 @@ Nothing else changes. Video (RTSP) never passes through the shim, the camera doe
 
 ## Compatibility
 
-**Tested on:**
-- UniFi Dream Machine Pro, UniFi OS 5.1.33, UniFi Protect 7.3.56 (third-party ONVIF motion requires Protect 7.1.55 or newer)
-- Reolink **RLC-1240A**, firmware v3.2.0.5758
+Third-party ONVIF motion in Protect needs **Protect 7.1.55 or newer**.
 
-**Likely to work:** other UniFi OS consoles that run Protect (UDM SE, UDR, UNVR, CK Gen2+), as long as they have `python3`, `iptables` and `systemd`, which UniFi OS 3.x and later have. It should also work with other Reolink PoE cameras that use the same gSOAP ONVIF stack and `MyRuleDetector/*Detect` AI topics. **If you try another model or console, please open an issue or PR with the result.**
+**Reported working:**
+
+| Camera | Firmware | Console | UniFi OS / Protect | Shim version | Notes | Reported by |
+|---|---|---|---|---|---|---|
+| Reolink **RLC-1240A** | v3.2.0.5758 | UDM Pro | 5.1.33 / 7.3.70 | 1.1.0 | AI motion and motion-start thumbnails. Snapshots up to ~3.4 MB, under Protect's 4 MiB limit. | [@cclifton7](https://github.com/cclifton7) |
+| Reolink **RLC-520A** | v3.0.0.4348 | UCG Fiber | 10.6.106 / 7.2.105 | 1.0.0 | AI motion (vehicle detection confirmed). Tested with thumbnails off. Also logs a harmless `analytics_service: 400`. | [#1](https://github.com/cclifton7/Unifi-Protect-Reolink-Onvif-Shim/issues/1) |
+| Reolink **E1 Outdoor Pro** | — | UCG Fiber | 5.1.33 / 7.3.70 | 1.1.0 (multi-camera) | Five cameras on one console via multi-camera support. | [#3](https://github.com/cclifton7/Unifi-Protect-Reolink-Onvif-Shim/pull/3) |
+| Reolink **E1 Pro** (×3) | — | UCG Fiber | 5.1.33 / 7.3.70 | 1.1.0 (multi-camera) | Same setup as above. | [#3](https://github.com/cclifton7/Unifi-Protect-Reolink-Onvif-Shim/pull/3) |
+| Reolink **Video Doorbell WiFi** | — | UCG Fiber | 5.1.33 / 7.3.70 | 1.1.0 (multi-camera) | Same setup as above. | [#3](https://github.com/cclifton7/Unifi-Protect-Reolink-Onvif-Shim/pull/3) |
+| Reolink **Duo P730** | — | UDM Pro | 5.1.33 / 7.3.70 | 1.0.0 | Motion works. **Thumbnails fail without a workaround:** its snapshots (~4–6 MB) exceed Protect's 4 MiB limit. See [#2](https://github.com/cclifton7/Unifi-Protect-Reolink-Onvif-Shim/issues/2). | [#2](https://github.com/cclifton7/Unifi-Protect-Reolink-Onvif-Shim/issues/2) |
+
+"—" means the firmware wasn't reported. The E1-series and doorbell were tested with the pre-release multi-camera branch that became 1.1.0.
+
+**Likely to work:** other UniFi OS consoles that run Protect (UDM SE, UDR, UNVR, CK Gen2+), as long as they have `python3`, `iptables` and `systemd`, which UniFi OS 3.x and later have. It should also work with other Reolink cameras that use the same gSOAP ONVIF stack and `MyRuleDetector/*Detect` AI topics. **If you try another model or console, please open an issue with the camera, firmware, console, UniFi OS and Protect versions, and whether motion and thumbnails work.**
 
 ## Installation
 
