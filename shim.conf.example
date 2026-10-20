@@ -5,7 +5,7 @@
 # reservations so they never change). Camera n in this list uses ports
 # SHIM_LISTEN_PORT+n and SHIM_SNAP_LISTEN_PORT+n; adding cameras at the end
 # keeps existing ones on the same ports. (SHIM_CAM_HOST=one-ip still works.)
-SHIM_CAM_HOSTS=192.0.2.10,192.0.2.11
+SHIM_CAM_HOSTS=192.0.2.10
 
 # Camera ports (Reolink defaults)
 SHIM_CAM_PORT=8000

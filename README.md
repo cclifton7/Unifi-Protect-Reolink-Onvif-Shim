@@ -134,7 +134,7 @@ cp /data/onvif-shim/shim.conf.example /data/onvif-shim/shim.conf
 ```bash
 vi /data/onvif-shim/shim.conf
 ```
-Set `SHIM_CAM_HOSTS=` to your cameras' IPs, comma-separated with no spaces (e.g. `SHIM_CAM_HOSTS=192.168.1.20,192.168.1.21`). The defaults are fine for everything else. (In `vi`: press `i` to edit, then **Esc**, then type `:wq` and press Enter.)
+Set `SHIM_CAM_HOSTS=` to your camera's IP. For more than one camera, list them comma-separated with no spaces (e.g. `SHIM_CAM_HOSTS=192.168.1.20,192.168.1.21`). The defaults are fine for everything else. (In `vi`: press `i` to edit, then **Esc**, then type `:wq` and press Enter.)
 
 **Skipping motion-start thumbnails?** Set `SHIM_SNAPSHOTS=0`, skip Step 5, and go to Step 6.
 
@@ -150,7 +150,7 @@ Set `SHIM_CAM_HOSTS=` to your cameras' IPs, comma-separated with no spaces (e.g.
 ```bash
 ssh root@CONSOLE_IP 'sh /data/onvif-shim/install.sh'
 ```
-Expected output ends with `onvif-shim installed for camera CAMERA_IP`.
+Expected output ends with `onvif-shim installed for camera(s) CAMERA_IP` (comma-separated if you listed several).
 
 ### 7. Recommended Protect settings
 - **Recording mode → Detections** for this camera, instead of Always. This is usually the big storage win.
@@ -288,10 +288,11 @@ To see which version you're running, compare the checksum of your copy (`md5sum 
 
 | Version | Date | `onvif_shim.py` md5 | Changes |
 |---|---|---|---|
+| **1.1.0** | 2026-10-20 | `3e2211ea70a542a79df48d32041218b7` | **New:** multi-camera support, contributed by [@devinsmith911](https://github.com/devinsmith911) in [#3](https://github.com/cclifton7/Unifi-Protect-Reolink-Onvif-Shim/pull/3). List cameras in `SHIM_CAM_HOSTS=ip1,ip2,...`. Each camera gets its own listener ports (`SHIM_LISTEN_PORT`+*n* / `SHIM_SNAP_LISTEN_PORT`+*n*) and DNAT rules, all in one process. Per-camera logins go in `camera.env` as `SHIM_CAM_USER.<ip>=` / `SHIM_CAM_PASS.<ip>=`. Log lines are prefixed with the camera IP when more than one camera is configured. `rule.sh` also removes leftover rules for cameras taken off the list. Existing single-camera configs (`SHIM_CAM_HOST=`) keep working unchanged. |
 | **1.0.1** | 2026-10-19 | `a533a3ec06673ae3c63593004af9a054` | **Fix:** motion could stop permanently after the camera rebooted or briefly dropped off the network. While the camera was unreachable, the shim closed Protect's connection without a response. Protect took that to mean the camera has no event service and marked motion `unsupported: no eventServicePath`, a state it never re-checks. The shim now resets the connection instead, so Protect treats the camera as temporarily unreachable and retries. If you were already affected, update, then remove and re-adopt the camera in Protect (see [Troubleshooting](#troubleshooting)). Also: `.gitignore` now excludes editor swap files, which can contain the camera password. |
 | **1.0.0** | 2026-09-24 | `f6a196d52b8dee7ea73522610a8841d3` | First release: WS-Addressing header fix, AI-driven motion, motion-start thumbnails, `shim.conf` configuration, installer and fail-safe firewall rules. |
 
-**Upgrading:** copy the new `onvif_shim.py` to `/data/onvif-shim/`, then run `systemctl restart onvif-shim && sleep 2 && sh /data/onvif-shim/rule.sh ensure`. Your `shim.conf` and `camera.env` are unchanged.
+**Upgrading:** copy the new `onvif_shim.py` and `rule.sh` to `/data/onvif-shim/` (from 1.0.x to 1.1.0, also `install.sh`), then run `systemctl restart onvif-shim && sleep 2 && sh /data/onvif-shim/rule.sh ensure`. Your `shim.conf` and `camera.env` are unchanged.
 
 ## License
 
