@@ -134,7 +134,7 @@ cp /data/onvif-shim/shim.conf.example /data/onvif-shim/shim.conf
 ```bash
 vi /data/onvif-shim/shim.conf
 ```
-Set `SHIM_CAM_HOST=` to your camera's IP. The defaults are fine for everything else. (In `vi`: press `i` to edit, then **Esc**, then type `:wq` and press Enter.)
+Set `SHIM_CAM_HOSTS=` to your cameras' IPs, comma-separated with no spaces (e.g. `SHIM_CAM_HOSTS=192.168.1.20,192.168.1.21`). The defaults are fine for everything else. (In `vi`: press `i` to edit, then **Esc**, then type `:wq` and press Enter.)
 
 **Skipping motion-start thumbnails?** Set `SHIM_SNAPSHOTS=0`, skip Step 5, and go to Step 6.
 
@@ -196,7 +196,7 @@ ssh root@CONSOLE_IP 'systemctl restart onvif-shim && sleep 2 && sh /data/onvif-s
 
 | Setting | Default | Description |
 |---|---|---|
-| `SHIM_CAM_HOST` | *(required)* | Camera IP address |
+| `SHIM_CAM_HOSTS` | *(required)* | Camera IP addresses, comma-separated. Camera *n* uses ports `SHIM_LISTEN_PORT`+*n* / `SHIM_SNAP_LISTEN_PORT`+*n*, so add new cameras at the end. `SHIM_CAM_HOST` (one IP) still works. |
 | `SHIM_CAM_PORT` | `8000` | Camera ONVIF port |
 | `SHIM_CAM_HTTP_PORT` | `80` | Camera HTTP port (snapshots) |
 | `SHIM_MOTION_MODE` | `ai` | `ai` = motion from AI detections; `passthrough` = header fix only (camera's own pixel motion) |
@@ -223,7 +223,7 @@ Credentials go in `/data/onvif-shim/camera.env` (created in Step 5), never in `s
 
 **Firmware updates:** UniFi OS updates can wipe the systemd units in `/etc` and the firewall rules. Your files in `/data` survive. If motion stops after an update, re-run `install.sh`. SSH keys may also need re-adding with `ssh-copy-id`.
 
-**Camera IP change:** update `SHIM_CAM_HOST`, restart, and update the camera's address in Protect.
+**Camera IP change / adding a camera:** update `SHIM_CAM_HOSTS`, restart, and update the camera's address in Protect.
 
 ## Troubleshooting
 
@@ -238,7 +238,7 @@ Credentials go in `/data/onvif-shim/camera.env` (created in Step 5), never in `s
 | Events in Protect but no phone notification | Add the camera to your **Alarm Manager** motion rule. Also check phone Focus modes and the Protect app's notification settings. |
 | `non-200 … deviceIO_service: 400` in the log | Harmless. Reolink doesn't implement that ONVIF service; this happens without the shim too. |
 | Motion stopped after the camera rebooted or dropped off; `onvif.events.log` shows `motionDetection available -> unsupported [unsupported: no eventServicePath]` | Shim versions before 1.0.1 closed Protect's connection silently while the camera was unreachable, and Protect took that to mean the camera has no event service. Protect doesn't re-check on its own: update the shim, then remove the camera in Protect and adopt it again. Check it's still in your Alarm Manager motion rule afterwards. |
-| Service won't start: `SHIM_CAM_HOST is not set` | Create or fix `/data/onvif-shim/shim.conf`. |
+| Service won't start: `SHIM_CAM_HOSTS is not set` | Create or fix `/data/onvif-shim/shim.conf`. |
 
 Protect's own logs are in `/srv/unifi-protect/logs/`. The useful ones are `onvif.events.log` and `events.cameras.log` (search for the camera's MAC or IP), and `notifications.push.log`.
 
@@ -266,7 +266,7 @@ Protect ──► CAMERA_IP:80   ──[iptables nat OUTPUT DNAT]──► 127.0
 
 ## Limitations
 
-- **One camera per install.** The shim handles a single camera IP. Multi-camera support (one listener pair per camera) would be a welcome contribution.
+- **Multiple cameras run in one process.** Each camera gets its own listener pair and DNAT rules. Cameras with their own login can use `SHIM_CAM_USER.<ip>=` / `SHIM_CAM_PASS.<ip>=` in `camera.env`; the plain `SHIM_CAM_USER` / `SHIM_CAM_PASS` apply to the rest.
 - **Protect shows plain "Motion", not "Person"/"Vehicle".** Protect doesn't accept third-party smart-detection types. The AI detections decide *when* motion happens, not how it's labeled.
 - **Unofficial:** a future Protect or UniFi OS release could change log paths or ONVIF behavior. If Protect ever adds WS-Addressing itself, set `SHIM_MOTION_MODE=passthrough` or uninstall.
 - AI-driven motion depends on Reolink's `MyRuleDetector/*Detect` ONVIF topics. Cameras without onboard AI should use `passthrough`.

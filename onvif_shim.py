@@ -2,8 +2,8 @@
 """ONVIF shim for UniFi Protect <-> Reolink cameras.
 
 Runs on the UniFi console (UDM / UDM Pro / UNVR, etc.) and sits between
-UniFi Protect and one third-party ONVIF camera via iptables nat OUTPUT DNAT
-rules. It:
+UniFi Protect and one or more third-party ONVIF cameras via iptables nat
+OUTPUT DNAT rules (one listener pair per camera, all in this one process). It:
 
   1. Adds the WS-Addressing headers (wsa:To / wsa:Action) that Reolink's gSOAP
      event service requires but Protect's PullMessages requests omit (without
@@ -31,25 +31,29 @@ from xml.sax.saxutils import escape
 
 LISTEN_HOST = os.environ.get("SHIM_LISTEN_HOST", "127.0.0.1")
 LISTEN_PORT = int(os.environ.get("SHIM_LISTEN_PORT", "18000"))
-CAM_HOST = os.environ.get("SHIM_CAM_HOST", "")
+CAM_HOSTS = [h.strip() for h in (os.environ.get("SHIM_CAM_HOSTS")
+                                  or os.environ.get("SHIM_CAM_HOST", "")).split(",") if h.strip()]
 CAM_PORT = int(os.environ.get("SHIM_CAM_PORT", "8000"))
 MARK = int(os.environ.get("SHIM_MARK", "0x40000000"), 16)
 SO_MARK = getattr(socket, "SO_MARK", 36)
 CRED_FILE = os.environ.get("SHIM_CRED_FILE", "/data/onvif-shim/camera.env")
 
 
-def load_creds():
-    """Read SHIM_CAM_USER / SHIM_CAM_PASS from CRED_FILE, values taken literally."""
+def load_creds(host):
+    """Read SHIM_CAM_USER / SHIM_CAM_PASS from CRED_FILE, values taken literally.
+
+    SHIM_CAM_USER.<camera ip> / SHIM_CAM_PASS.<camera ip> override them for one camera.
+    """
     creds = {}
     try:
         with open(CRED_FILE) as f:
             for line in f:
                 key, sep, value = line.rstrip("\r\n").partition("=")
-                if sep and key.strip() in ("SHIM_CAM_USER", "SHIM_CAM_PASS"):
+                if sep:
                     creds[key.strip()] = value
     except OSError:
         pass
-    return creds.get("SHIM_CAM_USER"), creds.get("SHIM_CAM_PASS")
+    return tuple(creds.get("%s.%s" % (k, host), creds.get(k)) for k in ("SHIM_CAM_USER", "SHIM_CAM_PASS"))
 
 
 SNAP_LISTEN_PORT = int(os.environ.get("SHIM_SNAP_LISTEN_PORT", "18080"))
@@ -83,16 +87,17 @@ class SnapshotCache:
     answer Protect's authenticated snapshot requests with that image.
     """
 
-    def __init__(self):
+    def __init__(self, cam):
+        self.cam = cam
         self.lock = threading.Lock()
         self.image = None
         self.ended_at = None
         self.gen = 0
         self.opener = None
-        user, pw = load_creds()
-        if SNAPSHOTS and user and pw:
+        self.user, pw = load_creds(cam.host)
+        if SNAPSHOTS and self.user and pw:
             pm = urllib.request.HTTPPasswordMgrWithDefaultRealm()
-            pm.add_password(None, "http://%s:%d/" % (CAM_HOST, CAM_HTTP_PORT), user, pw)
+            pm.add_password(None, "http://%s:%d/" % (cam.host, CAM_HTTP_PORT), self.user, pw)
             self.opener = urllib.request.build_opener(
                 MarkedHTTPHandler,
                 urllib.request.HTTPDigestAuthHandler(pm),
@@ -119,13 +124,13 @@ class SnapshotCache:
         t = time.monotonic()
         for attempt in range(1, attempts + 1):
             try:
-                r = self.opener.open("http://%s:%d%s" % (CAM_HOST, CAM_HTTP_PORT, SNAP_PATH), timeout=timeout)
+                r = self.opener.open("http://%s:%d%s" % (self.cam.host, CAM_HTTP_PORT, SNAP_PATH), timeout=timeout)
                 data = r.read()
                 if data[:2] != b"\xff\xd8":
                     raise ValueError("not a JPEG (%d bytes)" % len(data))
                 break
             except Exception as e:  # noqa: BLE001 -- log and fall back to pass-through
-                log("event snapshot attempt %d/%d failed: %s: %s" % (attempt, attempts, type(e).__name__, e))
+                self.cam.log("event snapshot attempt %d/%d failed: %s: %s" % (attempt, attempts, type(e).__name__, e))
                 with self.lock:
                     if gen != self.gen or self.ended_at is not None:
                         return  # event over or superseded; Protect fetches its own
@@ -135,7 +140,7 @@ class SnapshotCache:
             if gen != self.gen:
                 return  # a newer event started meanwhile
             self.image = data
-        log("event snapshot captured (%d KB in %.2fs)" % (len(data) // 1024, time.monotonic() - t))
+        self.cam.log("event snapshot captured (%d KB in %.2fs)" % (len(data) // 1024, time.monotonic() - t))
 
     def image_for_protect(self):
         """The motion-start image if Protect is fetching its end-of-event thumbnail."""
@@ -145,8 +150,6 @@ class SnapshotCache:
                 return self.image
         return None
 
-
-snapshots = None  # created in main(), after creds are readable
 
 WSA_NS = "http://www.w3.org/2005/08/addressing"
 ACTIONS = {
@@ -166,17 +169,10 @@ DATA_RE = re.compile(rb"<(?:[\w.-]+:)?Data>(.*?)</(?:[\w.-]+:)?Data>", re.S)
 ITEM_RE = re.compile(rb'<(?:[\w.-]+:)?SimpleItem\s+Name="([^"]+)"\s+Value="([^"]*)"')
 LOG_EVENTS = os.environ.get("SHIM_LOG_EVENTS", "1") == "1"
 
-stats = {"requests": 0, "injected": 0, "non200": 0, "snapshots_served": 0}
-stats_lock = threading.Lock()
 
 
 def log(msg):
     print(msg, flush=True)
-
-
-def bump(key):
-    with stats_lock:
-        stats[key] += 1
 
 
 def inject_wsa(body, host, path):
@@ -208,7 +204,7 @@ def inject_wsa(body, host, path):
     return body[:end] + b"<" + env.group(1) + b"Header>" + wsa + b"</" + env.group(1) + b"Header>" + body[end:]
 
 
-def log_events(resp):
+def log_events(cam, resp):
     """Log each event notification with the camera's UtcTime vs. our arrival time."""
     arrived = time.strftime("%H:%M:%S", time.gmtime()) + ".%03d" % (time.time() % 1 * 1000)
     for m in MSG_RE.finditer(resp):
@@ -217,7 +213,7 @@ def log_events(resp):
         utc = UTC_RE.search(msg)
         data = DATA_RE.search(msg)
         items = ITEM_RE.findall(data.group(1)) if data else []
-        log("event arrived=%sZ cam=%s topic=%s %s" % (
+        cam.log("event arrived=%sZ cam=%s topic=%s %s" % (
             arrived,
             utc.group(1).decode() if utc else "?",
             topic.group(1).decode().strip().split(":")[-1] if topic else "?",
@@ -249,7 +245,8 @@ class MotionTranslator:
     dropouts, and is delivered in a later PullMessages response if needed.
     """
 
-    def __init__(self):
+    def __init__(self, cam):
+        self.cam = cam
         self.lock = threading.Lock()
         self.active = set()        # AI topics currently true
         self.motion = False        # what Protect was last told
@@ -280,7 +277,7 @@ class MotionTranslator:
     def _log_raw_once(self, topic, msg):
         if topic not in self.raw_logged and len(self.raw_logged) < 20:
             self.raw_logged.add(topic)
-            log("raw sample %s: %s" % (topic.decode(errors="replace"),
+            self.cam.log("raw sample %s: %s" % (topic.decode(errors="replace"),
                                        msg.decode(errors="replace")[:1500]))
 
     def rewrite_response(self, resp):
@@ -312,9 +309,8 @@ class MotionTranslator:
                         if not self.motion:
                             self.motion = True
                             out.append(self._synth(msg, b"true"))
-                            if snapshots:
-                                snapshots.motion_started()
-                            log("motion ON  (AI: %s)" % b",".join(
+                            self.cam.snapshots.motion_started()
+                            self.cam.log("motion ON  (AI: %s)" % b",".join(
                                 x.split(b"/")[-1] for x in sorted(self.active)).decode())
                     elif self.motion and self.off_due is None:
                         self.off_due = time.monotonic() + OFF_HOLD
@@ -332,9 +328,8 @@ class MotionTranslator:
                 if end and self.template:
                     new_body = (new_body[:end.start()] + self._synth(self.template, b"false")
                                 + new_body[end.start():])
-                log("motion OFF")
-                if snapshots:
-                    snapshots.motion_stopped()
+                self.cam.log("motion OFF")
+                self.cam.snapshots.motion_stopped()
 
         if new_body == body:
             return resp
@@ -342,7 +337,25 @@ class MotionTranslator:
         return head + sep + new_body
 
 
-translator = MotionTranslator()
+class Camera:
+    """Per-camera state; camera n listens on LISTEN_PORT+n / SNAP_LISTEN_PORT+n."""
+
+    def __init__(self, index, host, prefix_logs):
+        self.host = host
+        self.listen_port = LISTEN_PORT + index
+        self.snap_listen_port = SNAP_LISTEN_PORT + index
+        self.prefix = "[%s] " % host if prefix_logs else ""
+        self.stats = {"requests": 0, "injected": 0, "non200": 0, "snapshots_served": 0}
+        self.stats_lock = threading.Lock()
+        self.snapshots = SnapshotCache(self)
+        self.translator = MotionTranslator(self)
+
+    def log(self, msg):
+        log(self.prefix + msg)
+
+    def bump(self, key):
+        with self.stats_lock:
+            self.stats[key] += 1
 
 
 def read_request(rfile):
@@ -379,13 +392,14 @@ class Handler(socketserver.StreamRequestHandler):
     timeout = 120
 
     def handle(self):
+        cam = self.server.cam
         req = read_request(self.rfile)
         if req is None:
             return
         line, headers, body = req
-        bump("requests")
+        cam.bump("requests")
         port = self.server.upstream_port
-        host = CAM_HOST + ":" + str(port)
+        host = cam.host + ":" + str(port)
         authorized = False
         for x in headers:
             k, _, v = x.partition(b":")
@@ -400,21 +414,21 @@ class Handler(socketserver.StreamRequestHandler):
         if port == CAM_HTTP_PORT:
             # Only answer once Protect has authenticated (it retries after the
             # camera's 401 challenge), so unauthenticated callers get nothing.
-            img = snapshots.image_for_protect() if (
-                snapshots and authorized and path.startswith(SNAP_PATH.split("&")[0])) else None
+            img = cam.snapshots.image_for_protect() if (
+                authorized and path.startswith(SNAP_PATH.split("&")[0])) else None
             if img:
                 self.wfile.write(
                     b"HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: "
                     + str(len(img)).encode() + b"\r\nConnection: close\r\n\r\n" + img)
                 self.wfile.flush()
-                bump("snapshots_served")
-                log("served motion-start snapshot to Protect (%d KB)" % (len(img) // 1024))
+                cam.bump("snapshots_served")
+                cam.log("served motion-start snapshot to Protect (%d KB)" % (len(img) // 1024))
                 return
         else:
             new_body = inject_wsa(body, host, path) if body else None
             if new_body is not None:
                 body = new_body
-                bump("injected")
+                cam.bump("injected")
 
         out = [line.rstrip(b"\r\n")]
         for x in headers:
@@ -432,7 +446,7 @@ class Handler(socketserver.StreamRequestHandler):
         try:
             up.setsockopt(socket.SOL_SOCKET, SO_MARK, MARK)
             up.settimeout(90)
-            up.connect((CAM_HOST, port))
+            up.connect((cam.host, port))
             up.sendall(raw)
             if "PullSubManager" in path:
                 # Event responses are small: buffer, translate, then send.
@@ -446,9 +460,9 @@ class Handler(socketserver.StreamRequestHandler):
                 if not resp:
                     raise ConnectionResetError("camera closed the connection with no response")
                 if LOG_EVENTS:
-                    log_events(resp)
+                    log_events(cam, resp)
                 if MOTION_MODE == "ai":
-                    resp = translator.rewrite_response(resp)
+                    resp = cam.translator.rewrite_response(resp)
                 self.wfile.write(resp)
                 self.wfile.flush()
                 return
@@ -462,8 +476,8 @@ class Handler(socketserver.StreamRequestHandler):
                     status = chunk.split(b"\r\n", 1)[0]
                     challenge = port == CAM_HTTP_PORT and b" 401 " in status
                     if b" 200 " not in status and not challenge:
-                        bump("non200")
-                        log("non-200 from camera for %s %s: %s" % (
+                        cam.bump("non200")
+                        cam.log("non-200 from camera for %s %s: %s" % (
                             parts[0].decode(errors="replace"), path,
                             status.decode(errors="replace")))
                 self.wfile.write(chunk)
@@ -472,7 +486,7 @@ class Handler(socketserver.StreamRequestHandler):
                 raise ConnectionResetError("camera closed the connection with no response")
             self.wfile.flush()
         except OSError as e:
-            log("upstream error for %s: %s" % (path, e))
+            cam.log("upstream error for %s: %s" % (path, e))
             if not sent:
                 self.abort()
         finally:
@@ -500,37 +514,48 @@ class Server(socketserver.ThreadingTCPServer):
     daemon_threads = True
 
 
-def stats_loop():
+def stats_loop(cams):
     while True:
         time.sleep(3600)
-        with stats_lock:
-            log("stats: %s" % stats)
+        for cam in cams:
+            with cam.stats_lock:
+                cam.log("stats: %s" % cam.stats)
 
 
-def serve(listen_port, upstream_port):
+def serve(cam, listen_port, upstream_port):
     srv = Server((LISTEN_HOST, listen_port), Handler)
+    srv.cam = cam
     srv.upstream_port = upstream_port
     log("listening on %s:%d -> %s:%d (mark 0x%x)" % (
-        LISTEN_HOST, listen_port, CAM_HOST, upstream_port, MARK))
+        LISTEN_HOST, listen_port, cam.host, upstream_port, MARK))
     return srv
 
 
 def main():
-    global snapshots
-    if not CAM_HOST:
-        log("SHIM_CAM_HOST is not set (see shim.conf); exiting")
+    if not CAM_HOSTS:
+        log("SHIM_CAM_HOSTS is not set (see shim.conf); exiting")
         return 2
-    snapshots = SnapshotCache()
-    user, _ = load_creds()
-    log("motion mode: %s; thumbnails: %s" % (MOTION_MODE, (
-        "motion-start capture enabled (user %r)" % user if snapshots.enabled()
-        else "disabled" if not SNAPSHOTS
-        else "no credentials in %s, passing through" % CRED_FILE)))
-    threading.Thread(target=stats_loop, daemon=True).start()
-    if SNAPSHOTS:
-        snap_srv = serve(SNAP_LISTEN_PORT, CAM_HTTP_PORT)
-        threading.Thread(target=snap_srv.serve_forever, daemon=True).start()
-    serve(LISTEN_PORT, CAM_PORT).serve_forever()
+    if len(set(CAM_HOSTS)) != len(CAM_HOSTS):
+        log("SHIM_CAM_HOSTS lists a camera twice; exiting")
+        return 2
+    if LISTEN_PORT + len(CAM_HOSTS) > SNAP_LISTEN_PORT:
+        log("too many cameras for the port gap between SHIM_LISTEN_PORT and SHIM_SNAP_LISTEN_PORT; exiting")
+        return 2
+    cams = [Camera(i, h, len(CAM_HOSTS) > 1) for i, h in enumerate(CAM_HOSTS)]
+    log("motion mode: %s; cameras: %d" % (MOTION_MODE, len(cams)))
+    servers = []
+    for cam in cams:
+        cam.log("thumbnails: %s" % (
+            "motion-start capture enabled (user %r)" % cam.snapshots.user if cam.snapshots.enabled()
+            else "disabled" if not SNAPSHOTS
+            else "no credentials in %s, passing through" % CRED_FILE))
+        if SNAPSHOTS:
+            servers.append(serve(cam, cam.snap_listen_port, CAM_HTTP_PORT))
+        servers.append(serve(cam, cam.listen_port, CAM_PORT))
+    threading.Thread(target=stats_loop, args=(cams,), daemon=True).start()
+    for srv in servers[:-1]:
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+    servers[-1].serve_forever()
 
 
 if __name__ == "__main__":
