@@ -236,6 +236,7 @@ Credentials go in `/data/onvif-shim/camera.env` (created in Step 5), never in `s
 | `Snapshot not available` in Protect logs | HTTP (port 80) is disabled on the camera. Needed for *any* third-party thumbnail, with or without the shim. |
 | Events in Protect but no phone notification | Add the camera to your **Alarm Manager** motion rule. Also check phone Focus modes and the Protect app's notification settings. |
 | `non-200 … deviceIO_service: 400` in the log | Harmless. Reolink doesn't implement that ONVIF service; this happens without the shim too. |
+| Motion stopped after the camera rebooted or dropped off; `onvif.events.log` shows `motionDetection available -> unsupported [unsupported: no eventServicePath]` | Shim versions before the outage fix closed Protect's connection silently while the camera was unreachable, and Protect took that to mean the camera has no event service. Protect doesn't re-check on its own: update the shim, then remove the camera in Protect and adopt it again. Check it's still in your Alarm Manager motion rule afterwards. |
 | Service won't start: `SHIM_CAM_HOST is not set` | Create or fix `/data/onvif-shim/shim.conf`. |
 
 Protect's own logs are in `/srv/unifi-protect/logs/`. The useful ones are `onvif.events.log` and `events.cameras.log` (search for the camera's MAC or IP), and `notifications.push.log`.
