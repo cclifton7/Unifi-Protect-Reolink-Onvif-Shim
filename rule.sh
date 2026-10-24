@@ -4,6 +4,7 @@
 # SHIM_SNAP_LISTEN_PORT+n. Any of our rules not wanted right now (shim down,
 # snapshots off, camera removed from the list) are deleted.
 # Usage: rule.sh ensure | remove
+# ensure exits 1 if a wanted rule could not be added.
 D=${SHIM_DIR:-/data/onvif-shim}
 [ -f "$D/shim.conf" ] || { echo "missing $D/shim.conf"; exit 1; }
 . "$D/shim.conf"
@@ -35,18 +36,25 @@ prune() {
 
 case "$1" in
   ensure)
-    keep="" i=0
+    keep="" i=0 rc=0
     for host in $HOSTS; do
       for pair in "$CAM_PORT:$((LISTEN + i)):1" "$CAM_HTTP_PORT:$((SNAP_LISTEN + i)):$SNAP"; do
         cam=${pair%%:*}; rest=${pair#*:}; shim=${rest%%:*}; enabled=${rest##*:}
         if [ "$enabled" = 1 ] && shim_up $shim; then
           keep="$keep $host:$cam:$shim"
-          has_rule $host $cam $shim || { iptables -t nat -I $(rule $host $cam $shim) && logger -t onvif-shim "DNAT $host:$cam -> :$shim (re)added"; }
+          has_rule $host $cam $shim || {
+            if iptables -t nat -I $(rule $host $cam $shim); then
+              logger -t onvif-shim "DNAT $host:$cam -> :$shim (re)added"
+            else
+              logger -t onvif-shim "DNAT $host:$cam -> :$shim could not be added"; rc=1
+            fi
+          }
         fi
       done
       i=$((i + 1))
     done
     prune "$keep"
+    exit $rc
     ;;
   remove) prune "" ;;
   *) echo "usage: $0 ensure|remove"; exit 2 ;;
