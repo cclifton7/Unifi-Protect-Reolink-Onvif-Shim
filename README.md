@@ -98,7 +98,9 @@ Third-party ONVIF motion in Protect needs **Protect 7.1.55 or newer**.
 
 "—" means the firmware wasn't reported. The E1-series and doorbell were tested with the pre-release multi-camera branch that became 1.1.0.
 
-**Likely to work:** other UniFi OS consoles that run Protect (UDM SE, UDR, UNVR, CK Gen2+), as long as they have `python3`, `iptables` and `systemd`, which UniFi OS 3.x and later have. It should also work with other Reolink cameras that use the same gSOAP ONVIF stack and `MyRuleDetector/*Detect` AI topics. **If you try another model or console, please open an issue with the camera, firmware, console, UniFi OS and Protect versions, and whether motion and thumbnails work.**
+**Not supported: UNVR and UNVR Pro.** Their kernel is built without netfilter (`# CONFIG_NETFILTER is not set` in the UniFi OS 6.0.11 firmware for both models), so the NAT redirect the shim depends on can't exist there. `iptables-nft` and other redirect methods (tc, eBPF) are compiled out too. This holds even when the gateway is a separate console, because the shim has to run where Protect runs. See [#4](https://github.com/cclifton7/Unifi-Protect-Reolink-Onvif-Shim/issues/4).
+
+**Likely to work:** other UniFi OS consoles that run Protect and have full `iptables` NAT support, such as the gateway consoles (UDM SE, UDR, other UCG models). Other Protect hosts that aren't gateways, such as the CK Gen2+ and the other NVR models, haven't been checked and may lack NAT in the same way as the UNVR. The console also needs `python3` and `systemd`, which UniFi OS 3.x and later have. It should also work with other Reolink cameras that use the same gSOAP ONVIF stack and `MyRuleDetector/*Detect` AI topics. **If you try another model or console, please open an issue with the camera, firmware, console, UniFi OS and Protect versions, and whether motion and thumbnails work.**
 
 ## Installation
 
@@ -110,6 +112,7 @@ Everything below runs **on the UniFi console** over SSH, except copying the file
 - The camera is already **adopted in Protect** as a third-party ONVIF camera. ONVIF must be enabled on the camera (Reolink default port **8000**), and Protect needs the camera's credentials.
 - The camera has a **fixed IP**: create a DHCP reservation in UniFi Network. The shim is configured by IP.
 - Protect **7.1.55 or newer** (Protect → Settings → Control Plane / About).
+- The console running Protect supports iptables NAT. **UNVR and UNVR Pro don't** (see [Compatibility](#compatibility)). To check, run `iptables -t nat -S OUTPUT` on the console. It should print `-P OUTPUT ACCEPT` and not an error.
 
 ### 1. Enable SSH on the console
 UniFi OS → **Console Settings → SSH** → enable it and set a strong password. The SSH user is `root`.
@@ -249,6 +252,7 @@ Credentials go in `/data/onvif-shim/camera.env` (created in Step 5), never in `s
 | Events in Protect but no phone notification | Add the camera to your **Alarm Manager** motion rule. Also check phone Focus modes and the Protect app's notification settings. |
 | `non-200 … deviceIO_service: 400` in the log | Harmless. Reolink doesn't implement that ONVIF service; this happens without the shim too. |
 | Motion stopped after the camera rebooted or dropped off; `onvif.events.log` shows `motionDetection available -> unsupported [unsupported: no eventServicePath]` | Shim versions before 1.0.1 closed Protect's connection silently while the camera was unreachable, and Protect took that to mean the camera has no event service. Protect doesn't re-check on its own: update the shim, then remove the camera in Protect and adopt it again. Check it's still in your Alarm Manager motion rule afterwards. |
+| `modprobe: FATAL: Module ip_tables not found` / `can't initialize iptables table 'nat'` (sometimes with the message `Will be implemented real soon. I promise ;)`) | The console's kernel has no netfilter, so the shim can't run on it. This is the case on the UNVR and UNVR Pro. See [Compatibility](#compatibility) and [#4](https://github.com/cclifton7/Unifi-Protect-Reolink-Onvif-Shim/issues/4). Remove it with `sh /data/onvif-shim/install.sh uninstall` (it prints the same errors, but still removes everything). |
 | Service won't start: `SHIM_CAM_HOSTS is not set` | Create or fix `/data/onvif-shim/shim.conf`. |
 
 Protect's own logs are in `/srv/unifi-protect/logs/`. The useful ones are `onvif.events.log` and `events.cameras.log` (search for the camera's MAC or IP), and `notifications.push.log`.
