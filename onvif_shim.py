@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ONVIF shim for UniFi Protect <-> Reolink cameras.
 
-Runs on the UniFi console (UDM / UDM Pro / UNVR, etc.) and sits between
+Runs on the UniFi console (UDM / UDM Pro / UCG, etc.; not UNVR) and sits between
 UniFi Protect and one or more third-party ONVIF cameras via iptables nat
 OUTPUT DNAT rules (one listener pair per camera, all in this one process). It:
 
