@@ -19,6 +19,17 @@ fi
 . $D/shim.conf
 [ -n "${SHIM_CAM_HOSTS:-$SHIM_CAM_HOST}" ] || { echo "Set SHIM_CAM_HOSTS in $D/shim.conf"; exit 1; }
 command -v python3 >/dev/null || { echo "python3 not found on this console"; exit 1; }
+command -v iptables >/dev/null || { echo "iptables not found on this console"; exit 1; }
+# The shim only works through an iptables nat OUTPUT rule. Some Protect hosts
+# (UNVR, UNVR Pro) have a kernel built without netfilter: stop before
+# installing anything rather than leave a shim that nothing is sent to.
+if ! nat_err=$(iptables -t nat -S OUTPUT 2>&1); then
+  echo "This console can't create iptables NAT rules, so the shim can't run here."
+  echo "UNVR and UNVR Pro are not supported: their kernel has no netfilter."
+  echo "See README.md > Compatibility. iptables said:"
+  echo "$nat_err" | sed 's/^/  /'
+  exit 1
+fi
 
 cat > $U/onvif-shim.service <<EOF
 [Unit]
