@@ -72,7 +72,26 @@ EOF
 systemctl daemon-reload
 systemctl enable onvif-shim.service
 systemctl restart onvif-shim.service
-sleep 2
-sh $D/rule.sh ensure
 systemctl enable --now onvif-shim-rule.timer
+
+# rule.sh only adds a camera's ONVIF rule once the shim is listening, so give
+# the shim a few seconds, then check that every camera's rule is in place.
+CAM_PORT=${SHIM_CAM_PORT:-8000}
+missing=""
+for try in 1 2 3 4 5; do
+  sleep 2
+  rule_ok=1; sh $D/rule.sh ensure || rule_ok=0
+  missing=""
+  for host in $(echo "${SHIM_CAM_HOSTS:-$SHIM_CAM_HOST}" | tr ',' ' '); do
+    iptables -t nat -S OUTPUT | grep -qE -- "-d $host/32 .*--dport $CAM_PORT .*--to-destination 127\.0\.0\.1:" || missing="$missing $host"
+  done
+  # (an if, not an && chain: under set -e a failing last test would exit the script)
+  if [ -z "$missing" ] && [ $rule_ok = 1 ]; then break; fi
+done
+if [ -n "$missing" ] || [ $rule_ok = 0 ]; then
+  echo "onvif-shim did NOT install cleanly: ONVIF redirect missing for camera(s):${missing:- (see log)}"
+  echo "The shim may not be running. Check: journalctl -u onvif-shim -n 30 --no-pager"
+  echo "The rule timer will keep retrying. To remove everything: sh $D/install.sh uninstall"
+  exit 1
+fi
 echo "onvif-shim installed for camera(s) ${SHIM_CAM_HOSTS:-$SHIM_CAM_HOST}"
