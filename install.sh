@@ -8,7 +8,11 @@ U=/etc/systemd/system
 
 if [ "$1" = "uninstall" ]; then
   systemctl disable --now onvif-shim-rule.timer onvif-shim.service 2>/dev/null || true
-  [ -f $D/shim.conf ] && sh $D/rule.sh remove
+  # Skip rule removal where iptables NAT doesn't work (e.g. UNVR): there can't
+  # be any rules to remove, and trying only prints modprobe/iptables errors.
+  if [ -f $D/shim.conf ] && iptables -t nat -S OUTPUT >/dev/null 2>&1; then
+    sh $D/rule.sh remove
+  fi
   rm -f $U/onvif-shim.service $U/onvif-shim-rule.service $U/onvif-shim-rule.timer
   systemctl daemon-reload
   echo "onvif-shim uninstalled"
